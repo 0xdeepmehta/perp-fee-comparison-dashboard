@@ -77,6 +77,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     else:
         st.warning(f"Could not find borrow rate data for {selected_asset} in Flash Trade. Using 0 for calculations.")
         flash_variable_fees = 0
+        flash_borrow_rates = pd.Series([0] * len(df))
     flash_total_fees = (2 * flash_open_close_fee) + (2 * flash_swap_fee) + flash_variable_fees
 
     # Jup Perps calculations
@@ -97,6 +98,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     else:
         st.warning(f"Could not find borrow rate data for {selected_asset} in Jup Perps. Using 0 for calculations.")
         jup_variable_fees = 0
+        jup_borrow_rates = pd.Series([0] * len(df))
     jup_total_fees = jup_open_fee + jup_close_fee + jup_variable_fees
 
     # Asgard (MarginFi) calculations
@@ -105,7 +107,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     asgard_borrow_rate_column = f'marginfi.{asgard_borrow_asset.lower()}Token.borrowIRate' # borrowIRate is in decimals
     if asgard_deposit_rate_column in df.columns and asgard_borrow_rate_column in df.columns:
         asgard_deposit_rates = df[asgard_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
-        asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 24)  *100 # Convert annual decimals to hourly percentage
+        asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 24) * 100 # Convert annual decimals to hourly percentage
         asgard_net_rates = asgard_borrow_rates - asgard_deposit_rates
         asgard_actual_net_rates = asgard_borrow_rates - (asgard_deposit_rates * leverage)
         asgard_total_actual_net_rate = asgard_actual_net_rates.sum() / 100  # Convert percentage to decimal
@@ -114,7 +116,36 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
         st.warning(f"Could not find rate data for Asgard (MarginFi). Using 0 for calculations.")
         asgard_variable_fees = 0
         asgard_net_rates = pd.Series([0] * len(df))
+        asgard_actual_net_rates = pd.Series([0] * len(df))
     asgard_total_fees = (2 * asgard_open_close_fee) + asgard_variable_fees
+
+    # Create time series for variable fees and total fees
+    timestamps = pd.to_datetime(df['createdAt'])
+    drift_variable_fees_series = drift_funding_rates.cumsum() / 100 * position_size
+    flash_variable_fees_series = flash_borrow_rates.cumsum() / 100 * position_size
+    jup_variable_fees_series = jup_borrow_rates.cumsum() / 100 * position_size
+    asgard_variable_fees_series = asgard_actual_net_rates.cumsum() / 100 * margin_size
+
+    drift_total_fees_series = drift_variable_fees_series + (2 * drift_open_close_fee)
+    flash_total_fees_series = flash_variable_fees_series + (2 * flash_open_close_fee) + (2 * flash_swap_fee)
+    jup_total_fees_series = jup_variable_fees_series + jup_open_fee + jup_close_fee
+    asgard_total_fees_series = asgard_variable_fees_series + (2 * asgard_open_close_fee)
+
+    variable_fees_df = pd.DataFrame({
+        'Timestamp': timestamps,
+        'Drift': drift_variable_fees_series,
+        'Flash Trade': flash_variable_fees_series,
+        'Jup Perps': jup_variable_fees_series,
+        'Asgard (MarginFi)': asgard_variable_fees_series
+    })
+
+    total_fees_df = pd.DataFrame({
+        'Timestamp': timestamps,
+        'Drift': drift_total_fees_series,
+        'Flash Trade': flash_total_fees_series,
+        'Jup Perps': jup_total_fees_series,
+        'Asgard (MarginFi)': asgard_total_fees_series
+    })
 
     return {
         'Exchange': ['Drift', 'Flash Trade', 'Jup Perps', 'Asgard (MarginFi)'],
@@ -122,7 +153,16 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
         'Variable Fees': [drift_variable_fees, flash_variable_fees, jup_variable_fees, asgard_variable_fees],
         'Close Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_close_fee, asgard_open_close_fee],
         'Total Fees': [drift_total_fees, flash_total_fees, jup_total_fees, asgard_total_fees]
-    }, asgard_net_rates
+    }, asgard_net_rates, variable_fees_df, total_fees_df
+
+# Display selected inputs in the main area
+st.subheader('Selected Inputs')
+st.write(f"Time Period: {time_value} {time_unit}")
+st.write(f"Date Range: {start_date_str} to {end_date_str}")
+st.write(f"Asset: {selected_asset}")
+st.write(f"Margin Size: ${margin_size:.2f}")
+st.write(f"Leverage: {selected_leverage}x")
+st.write(f"Asgard Borrow Asset: {asgard_borrow_asset}")
 
 # Fetch data when the user clicks the button
 if st.sidebar.button('Calculate Fees'):
@@ -132,7 +172,7 @@ if st.sidebar.button('Calculate Fees'):
         st.success("Data fetched successfully!")
         
         df = pd.json_normalize(data)
-        fees, asgard_net_rates = calculate_fees(df, selected_asset, margin_size, selected_leverage, asgard_borrow_asset)
+        fees, asgard_net_rates, variable_fees_df, total_fees_df = calculate_fees(df, selected_asset, margin_size, selected_leverage, asgard_borrow_asset)
         
         st.subheader("Fee Comparison")
         fee_df = pd.DataFrame(fees)
@@ -187,12 +227,15 @@ if st.sidebar.button('Calculate Fees'):
             rates_df['Jup Perps Borrow Rate'] = df[jup_borrow_rate_column]
         st.line_chart(rates_df)
 
+        # New chart for Variable Fees
+        st.subheader("Variable Fees Over Time")
+        variable_fees_chart = variable_fees_df.set_index('Timestamp')
+        st.line_chart(variable_fees_chart)
 
-# Display selected inputs in the main area
-st.subheader('Selected Inputs')
-st.write(f"Time Period: {time_value} {time_unit}")
-st.write(f"Date Range: {start_date_str} to {end_date_str}")
-st.write(f"Asset: {selected_asset}")
-st.write(f"Margin Size: ${margin_size:.2f}")
-st.write(f"Leverage: {selected_leverage}x")
-st.write(f"Asgard Borrow Asset: {asgard_borrow_asset}")
+        # New chart for Total Fees
+        st.subheader("Total Fees Over Time")
+        total_fees_chart = total_fees_df.set_index('Timestamp')
+        st.line_chart(total_fees_chart)
+
+    else:
+        st.error("Failed to fetch data. Please try again.")
