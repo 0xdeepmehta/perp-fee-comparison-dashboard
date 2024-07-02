@@ -119,24 +119,45 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
         asgard_actual_net_rates = pd.Series([0] * len(df))
     asgard_total_fees = (2 * asgard_open_close_fee) + asgard_variable_fees
 
+    # Asgard (Kamino) calculations
+    kamino_open_close_fee = 0.0007 * position_size
+    kamino_deposit_rate_column = f'kamino.{selected_asset.lower()}Token.depositIRate' # depositIRate is in decimals
+    kamino_borrow_rate_column = f'kamino.{asgard_borrow_asset.lower()}Token.borrowIRate' # borrowIRate is in decimals
+    if kamino_deposit_rate_column in df.columns and kamino_borrow_rate_column in df.columns:
+        kamino_deposit_rates = df[kamino_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
+        kamino_borrow_rates = df[kamino_borrow_rate_column] / (365 * 24) * 100 # Convert annual decimals to hourly percentage
+        kamino_net_rates = kamino_borrow_rates - kamino_deposit_rates
+        kamino_actual_net_rates = kamino_borrow_rates - (kamino_deposit_rates * leverage)
+        kamino_total_actual_net_rate = kamino_actual_net_rates.sum() / 100  # Convert percentage to decimal
+        kamino_variable_fees = kamino_total_actual_net_rate * margin_size
+    else:
+        st.warning(f"Could not find rate data for Asgard (Kamino). Using 0 for calculations.")
+        kamino_variable_fees = 0
+        kamino_net_rates = pd.Series([0] * len(df))
+        kamino_actual_net_rates = pd.Series([0] * len(df))
+    kamino_total_fees = (2 * kamino_open_close_fee) + kamino_variable_fees
+
     # Create time series for variable fees and total fees
     timestamps = pd.to_datetime(df['createdAt'])
     drift_variable_fees_series = drift_funding_rates.cumsum() / 100 * position_size
     flash_variable_fees_series = flash_borrow_rates.cumsum() / 100 * position_size
     jup_variable_fees_series = jup_borrow_rates.cumsum() / 100 * position_size
     asgard_variable_fees_series = asgard_actual_net_rates.cumsum() / 100 * margin_size
+    kamino_variable_fees_series = kamino_actual_net_rates.cumsum() / 100 * margin_size
 
     drift_total_fees_series = drift_variable_fees_series + (2 * drift_open_close_fee)
     flash_total_fees_series = flash_variable_fees_series + (2 * flash_open_close_fee) + (2 * flash_swap_fee)
     jup_total_fees_series = jup_variable_fees_series + jup_open_fee + jup_close_fee
     asgard_total_fees_series = asgard_variable_fees_series + (2 * asgard_open_close_fee)
+    kamino_total_fees_series = kamino_variable_fees_series + (2 * kamino_open_close_fee)
 
     variable_fees_df = pd.DataFrame({
         'Timestamp': timestamps,
         'Drift': drift_variable_fees_series,
         'Flash Trade': flash_variable_fees_series,
         'Jup Perps': jup_variable_fees_series,
-        'Asgard (MarginFi)': asgard_variable_fees_series
+        'Asgard (MarginFi)': asgard_variable_fees_series,
+        'Asgard (Kamino)': kamino_variable_fees_series
     })
 
     total_fees_df = pd.DataFrame({
@@ -144,16 +165,17 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
         'Drift': drift_total_fees_series,
         'Flash Trade': flash_total_fees_series,
         'Jup Perps': jup_total_fees_series,
-        'Asgard (MarginFi)': asgard_total_fees_series
+        'Asgard (MarginFi)': asgard_total_fees_series,
+        'Asgard (Kamino)': kamino_total_fees_series
     })
 
     return {
-        'Exchange': ['Drift', 'Flash Trade', 'Jup Perps', 'Asgard (MarginFi)'],
-        'Open Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_open_fee, asgard_open_close_fee],
-        'Variable Fees': [drift_variable_fees, flash_variable_fees, jup_variable_fees, asgard_variable_fees],
-        'Close Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_close_fee, asgard_open_close_fee],
-        'Total Fees': [drift_total_fees, flash_total_fees, jup_total_fees, asgard_total_fees]
-    }, asgard_net_rates, variable_fees_df, total_fees_df
+        'Exchange': ['Drift', 'Flash Trade', 'Jup Perps', 'Asgard (MarginFi)', 'Asgard (Kamino)'],
+        'Open Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_open_fee, asgard_open_close_fee, kamino_open_close_fee],
+        'Variable Fees': [drift_variable_fees, flash_variable_fees, jup_variable_fees, asgard_variable_fees, kamino_variable_fees],
+        'Close Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_close_fee, asgard_open_close_fee, kamino_open_close_fee],
+        'Total Fees': [drift_total_fees, flash_total_fees, jup_total_fees, asgard_total_fees, kamino_total_fees]
+    }, asgard_net_rates, kamino_net_rates, variable_fees_df, total_fees_df
 
 # Display selected inputs in the main area
 st.subheader('Selected Inputs')
@@ -172,7 +194,7 @@ if st.sidebar.button('Calculate Fees'):
         st.success("Data fetched successfully!")
         
         df = pd.json_normalize(data)
-        fees, asgard_net_rates, variable_fees_df, total_fees_df = calculate_fees(df, selected_asset, margin_size, selected_leverage, asgard_borrow_asset)
+        fees, asgard_net_rates, kamino_net_rates, variable_fees_df, total_fees_df = calculate_fees(df, selected_asset, margin_size, selected_leverage, asgard_borrow_asset)
         
         st.subheader("Fee Comparison")
         fee_df = pd.DataFrame(fees)
@@ -183,7 +205,7 @@ if st.sidebar.button('Calculate Fees'):
         flash_borrow_rate_column = f'flashPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
         jup_borrow_rate_column = f'jupPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.write("Drift Funding Rates")
             st.write(f"Average: {drift_funding_rates.mean():.4f}%")
@@ -215,11 +237,18 @@ if st.sidebar.button('Calculate Fees'):
             st.write(f"Average: {asgard_net_rates.mean():.4f}%")
             st.write(f"Total: {asgard_net_rates.sum():.4f}%")
             st.write(f"Cumulative Effect: {asgard_net_rates.sum():.4f}%")
+
+        with col5:
+            st.write("Asgard (Kamino) Net Rates")
+            st.write(f"Average: {kamino_net_rates.mean():.4f}%")
+            st.write(f"Total: {kamino_net_rates.sum():.4f}%")
+            st.write(f"Cumulative Effect: {kamino_net_rates.sum():.4f}%")
         
         st.subheader("Rates Over Time")
         rates_df = pd.DataFrame({
             'Drift Funding Rate': drift_funding_rates,
-            'Asgard Net Rate': asgard_net_rates
+            'Asgard (MarginFi) Net Rate': asgard_net_rates,
+            'Asgard (Kamino) Net Rate': kamino_net_rates
         })
         if flash_borrow_rate_column in df.columns:
             rates_df['Flash Trade Borrow Rate'] = df[flash_borrow_rate_column]
