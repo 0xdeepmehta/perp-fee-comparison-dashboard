@@ -48,7 +48,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     
     # Drift calculations
     drift_open_close_fee = 0.001 * position_size
-    drift_funding_rates = df['drift.SOLPerp.driftHourlyFunding']
+    drift_funding_rates = df['drift.SOLPerp.driftHourlyFunding'] # driftHourlyFunding is in percentage
     drift_total_funding_rate = drift_funding_rates.sum() / 100  # Convert percentage to decimal
     drift_variable_fees = drift_total_funding_rate * position_size
     drift_total_fees = (2 * drift_open_close_fee) + drift_variable_fees
@@ -76,7 +76,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     
     jup_open_fee = jup_trading_fee_coefficient * position_size
     jup_close_fee = 0.0007 * position_size
-    jup_borrow_rate_column = f'jupPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
+    jup_borrow_rate_column = f'jupPerp.{selected_asset.lower()}Token.HourlyBorrowRate' # HourlyBorrowRate is in percentage
     if jup_borrow_rate_column in df.columns:
         jup_borrow_rates = df[jup_borrow_rate_column]
         jup_total_borrow_rate = jup_borrow_rates.sum() / 100  # Convert percentage to decimal
@@ -88,13 +88,15 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
 
     # Asgard (MarginFi) calculations
     asgard_open_close_fee = 0.0007 * position_size
-    asgard_deposit_rate_column = f'marginfi.{selected_asset.lower()}Token.depositIRate'
-    asgard_borrow_rate_column = f'marginfi.{asgard_borrow_asset.lower()}Token.borrowIRate'
+    asgard_deposit_rate_column = f'marginfi.{selected_asset.lower()}Token.depositIRate' # depositIRate is in decimals
+    asgard_borrow_rate_column = f'marginfi.{asgard_borrow_asset.lower()}Token.borrowIRate' # borrowIRate is in decimals
     if asgard_deposit_rate_column in df.columns and asgard_borrow_rate_column in df.columns:
-        asgard_deposit_rates = df[asgard_deposit_rate_column] / (365 * 100)  # Convert annual % to daily decimal
-        asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 100)  # Convert annual % to daily decimal
-        asgard_net_rates = (asgard_deposit_rates * leverage) - asgard_borrow_rates
-        asgard_variable_fees = asgard_net_rates.sum() * position_size
+        asgard_deposit_rates = df[asgard_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
+        asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 24)  *100 # Convert annual decimals to hourly percentage
+        asgard_net_rates = asgard_borrow_rates - asgard_deposit_rates
+        asgard_actual_net_rates = asgard_borrow_rates - (asgard_deposit_rates * leverage)
+        asgard_total_actual_net_rate = asgard_actual_net_rates.sum() / 100  # Convert percentage to decimal
+        asgard_variable_fees = asgard_total_actual_net_rate * margin_size
     else:
         st.warning(f"Could not find rate data for Asgard (MarginFi). Using 0 for calculations.")
         asgard_variable_fees = 0
@@ -159,12 +161,12 @@ if st.sidebar.button('Calculate Fees'):
             st.write("Asgard (MarginFi) Net Rates")
             st.write(f"Average: {asgard_net_rates.mean():.4f}%")
             st.write(f"Total: {asgard_net_rates.sum():.4f}%")
-            st.write(f"Cumulative Effect: {asgard_net_rates.sum() * 100:.4f}%")
+            st.write(f"Cumulative Effect: {asgard_net_rates.sum():.4f}%")
         
         st.subheader("Rates Over Time")
         rates_df = pd.DataFrame({
             'Drift Funding Rate': drift_funding_rates,
-            'Asgard Net Rate': asgard_net_rates * 100  # Convert to percentage for plotting
+            'Asgard Net Rate': asgard_net_rates
         })
         if flash_borrow_rate_column in df.columns:
             rates_df['Flash Trade Borrow Rate'] = df[flash_borrow_rate_column]
