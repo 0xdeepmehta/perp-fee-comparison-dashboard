@@ -66,7 +66,9 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     drift_variable_fees = drift_total_funding_rate * position_size
     drift_total_fees = (2 * drift_open_close_fee) + drift_variable_fees
 
-    # Flash Trade calculations
+
+
+    # Flash Trade calculations # TODO: open fees are different for different assets
     flash_open_close_fee = 0.0015 * position_size
     flash_swap_fee = 0.0007 * margin_size
     flash_borrow_rate_column = f'flashPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
@@ -108,10 +110,10 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     if asgard_deposit_rate_column in df.columns and asgard_borrow_rate_column in df.columns:
         asgard_deposit_rates = df[asgard_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
         asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 24) * 100 # Convert annual decimals to hourly percentage
-        asgard_net_rates = asgard_borrow_rates - asgard_deposit_rates
-        asgard_actual_net_rates = asgard_borrow_rates - (asgard_deposit_rates * leverage)
+        asgard_net_rates = asgard_borrow_rates - (asgard_borrow_rates / leverage) - asgard_deposit_rates
+        asgard_actual_net_rates = asgard_borrow_rates - (asgard_borrow_rates / leverage) - asgard_deposit_rates
         asgard_total_actual_net_rate = asgard_actual_net_rates.sum() / 100  # Convert percentage to decimal
-        asgard_variable_fees = asgard_total_actual_net_rate * margin_size
+        asgard_variable_fees = asgard_total_actual_net_rate * position_size
     else:
         st.warning(f"Could not find rate data for Asgard (MarginFi). Using 0 for calculations.")
         asgard_variable_fees = 0
