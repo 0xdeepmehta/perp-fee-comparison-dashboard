@@ -9,10 +9,23 @@ st.title('Multi-Exchange Fee Comparison')
 # Sidebar for user inputs
 st.sidebar.header('User Inputs')
 
-# Date range selection in the sidebar
-st.sidebar.subheader('Date Range Selection')
-start_date = st.sidebar.date_input('Start Date', datetime.now() - timedelta(days=7))
-end_date = st.sidebar.date_input('End Date', datetime.now())
+# Time period selection
+st.sidebar.subheader('Time Period Selection')
+time_value = st.sidebar.number_input('Enter number of time units', min_value=1, value=7, step=1)
+time_unit = st.sidebar.selectbox('Select time unit', ['Hours', 'Days', 'Months'])
+
+# Calculate the start date based on the selected time period
+end_date = datetime.now()
+if time_unit == 'Hours':
+    start_date = end_date - timedelta(hours=time_value)
+elif time_unit == 'Days':
+    start_date = end_date - timedelta(days=time_value)
+else:  # Months
+    start_date = end_date - timedelta(days=time_value * 30)  # Approximating a month to 30 days
+
+# Format dates for API request
+start_date_str = start_date.strftime('%Y-%m-%d')
+end_date_str = end_date.strftime('%Y-%m-%d')
 
 # Asset selection
 assets = ['SOL', 'ETH', 'BONK']
@@ -113,7 +126,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
 
 # Fetch data when the user clicks the button
 if st.sidebar.button('Calculate Fees'):
-    data = fetch_data(start_date, end_date)
+    data = fetch_data(start_date_str, end_date_str)
     
     if data:
         st.success("Data fetched successfully!")
@@ -174,9 +187,11 @@ if st.sidebar.button('Calculate Fees'):
             rates_df['Jup Perps Borrow Rate'] = df[jup_borrow_rate_column]
         st.line_chart(rates_df)
 
+
 # Display selected inputs in the main area
 st.subheader('Selected Inputs')
-st.write(f"Date Range: {start_date} to {end_date}")
+st.write(f"Time Period: {time_value} {time_unit}")
+st.write(f"Date Range: {start_date_str} to {end_date_str}")
 st.write(f"Asset: {selected_asset}")
 st.write(f"Margin Size: ${margin_size:.2f}")
 st.write(f"Leverage: {selected_leverage}x")
