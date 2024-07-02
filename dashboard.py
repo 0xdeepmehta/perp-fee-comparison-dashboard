@@ -12,7 +12,7 @@ st.sidebar.header('User Inputs')
 # Time period selection
 st.sidebar.subheader('Time Period Selection')
 time_value = st.sidebar.number_input('Enter number of time units', min_value=1, value=7, step=1)
-time_unit = st.sidebar.selectbox('Select time unit', ['Hours', 'Days', 'Months'])
+time_unit = st.sidebar.selectbox('Select time unit', ['Hours', 'Days', 'Months'], index=1)  # Default to 'Days'
 
 # Calculate the start date based on the selected time period
 end_date = datetime.now()
@@ -31,12 +31,12 @@ end_date_str = end_date.strftime('%Y-%m-%d')
 assets = ['SOL', 'ETH', 'BONK']
 selected_asset = st.sidebar.selectbox('Select Asset', assets)
 
-# Margin size input
-margin_size = st.sidebar.number_input('Margin Size (USD)', min_value=1.0, value=10000.0, step=100.0)
+# Initial capital input (formerly Margin size)
+initial_capital = st.sidebar.number_input('Initial Capital (USD)', min_value=1.0, value=10000.0, step=100.0)
 
 # Leverage selection
 leverage_options = [1.5, 2.0, 3.0, 4.0, 5.0]
-selected_leverage = st.sidebar.selectbox('Select Leverage', leverage_options)
+selected_leverage = st.sidebar.selectbox('Select Leverage', leverage_options, index=1)
 
 # Asgard Inputs
 st.sidebar.subheader('Asgard Inputs')
@@ -53,8 +53,8 @@ def fetch_data(start_date, end_date):
         st.error(f"Failed to fetch data: {response.status_code}")
         return None
 
-def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asset):
-    position_size = margin_size * leverage
+def calculate_fees(df, selected_asset, initial_capital, leverage, asgard_borrow_asset):
+    position_size = initial_capital * leverage
     
     st.write(f"Calculating fees for asset: {selected_asset}")
     st.write(f"Position size: ${position_size:.2f}")
@@ -66,11 +66,9 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     drift_variable_fees = drift_total_funding_rate * position_size
     drift_total_fees = (2 * drift_open_close_fee) + drift_variable_fees
 
-
-
     # Flash Trade calculations # TODO: open fees are different for different assets
     flash_open_close_fee = 0.0015 * position_size
-    flash_swap_fee = 0.0007 * margin_size
+    flash_swap_fee = 0.0007 * initial_capital
     flash_borrow_rate_column = f'flashPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
     if flash_borrow_rate_column in df.columns:
         flash_borrow_rates = df[flash_borrow_rate_column]
@@ -131,7 +129,7 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
         kamino_net_rates = kamino_borrow_rates - kamino_deposit_rates
         kamino_actual_net_rates = kamino_borrow_rates - (kamino_deposit_rates * leverage)
         kamino_total_actual_net_rate = kamino_actual_net_rates.sum() / 100  # Convert percentage to decimal
-        kamino_variable_fees = kamino_total_actual_net_rate * margin_size
+        kamino_variable_fees = kamino_total_actual_net_rate * initial_capital
     else:
         st.warning(f"Could not find rate data for Asgard (Kamino). Using 0 for calculations.")
         kamino_variable_fees = 0
@@ -144,8 +142,8 @@ def calculate_fees(df, selected_asset, margin_size, leverage, asgard_borrow_asse
     drift_variable_fees_series = drift_funding_rates.cumsum() / 100 * position_size
     flash_variable_fees_series = flash_borrow_rates.cumsum() / 100 * position_size
     jup_variable_fees_series = jup_borrow_rates.cumsum() / 100 * position_size
-    asgard_variable_fees_series = asgard_actual_net_rates.cumsum() / 100 * margin_size
-    kamino_variable_fees_series = kamino_actual_net_rates.cumsum() / 100 * margin_size
+    asgard_variable_fees_series = asgard_actual_net_rates.cumsum() / 100 * initial_capital
+    kamino_variable_fees_series = kamino_actual_net_rates.cumsum() / 100 * initial_capital
 
     drift_total_fees_series = drift_variable_fees_series + (2 * drift_open_close_fee)
     flash_total_fees_series = flash_variable_fees_series + (2 * flash_open_close_fee) + (2 * flash_swap_fee)
@@ -184,7 +182,7 @@ st.subheader('Selected Inputs')
 st.write(f"Time Period: {time_value} {time_unit}")
 st.write(f"Date Range: {start_date_str} to {end_date_str}")
 st.write(f"Asset: {selected_asset}")
-st.write(f"Margin Size: ${margin_size:.2f}")
+st.write(f"Margin Size: ${initial_capital:.2f}")
 st.write(f"Leverage: {selected_leverage}x")
 st.write(f"Asgard Borrow Asset: {asgard_borrow_asset}")
 
@@ -196,7 +194,7 @@ if st.sidebar.button('Calculate Fees'):
         st.success("Data fetched successfully!")
         
         df = pd.json_normalize(data)
-        fees, asgard_net_rates, kamino_net_rates, variable_fees_df, total_fees_df = calculate_fees(df, selected_asset, margin_size, selected_leverage, asgard_borrow_asset)
+        fees, asgard_net_rates, kamino_net_rates, variable_fees_df, total_fees_df = calculate_fees(df, selected_asset, initial_capital, selected_leverage, asgard_borrow_asset)
         
         st.subheader("Fee Comparison")
         fee_df = pd.DataFrame(fees)
