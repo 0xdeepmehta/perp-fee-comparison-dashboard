@@ -60,26 +60,35 @@ def calculate_fees(df, selected_asset, initial_capital, leverage, asgard_borrow_
     st.write(f"Position size: ${position_size:.2f}")
     
     # Drift calculations
-    drift_open_close_fee = 0.001 * position_size
-    drift_funding_rates = df['drift.SOLPerp.driftHourlyFunding'] # driftHourlyFunding is in percentage
-    drift_total_funding_rate = drift_funding_rates.sum() / 100  # Convert percentage to decimal
-    drift_variable_fees = drift_total_funding_rate * position_size
-    drift_total_fees = (2 * drift_open_close_fee) + drift_variable_fees
+    drift_funding_column = f'drift.{selected_asset}Perp.driftHourlyFunding' # driftHourlyFunding is in percentage
+    if drift_funding_column in df.columns:
+        drift_funding_rates = df[drift_funding_column]
+        drift_open_close_fee = 0.001 * position_size
+        drift_total_funding_rate = drift_funding_rates.sum() / 100  # Convert percentage to decimal
+        drift_variable_fees = drift_total_funding_rate * position_size
+        drift_total_fees = (2 * drift_open_close_fee) + drift_variable_fees
+    else:
+        st.warning(f"Could not find funding rate data for {selected_asset} in Drift. Using 0 for calculations.")
+        drift_variable_fees = 0
+        drift_open_close_fee = 0
+        drift_funding_rates = pd.Series([0] * len(df))
+        drift_total_fees = 0
 
     # Flash Trade calculations # TODO: open fees are different for different assets
-    flash_open_close_fee = 0.0015 * position_size
-    flash_swap_fee = 0.0007 * initial_capital
     flash_borrow_rate_column = f'flashPerp.{selected_asset.lower()}Token.HourlyBorrowRate'
     if flash_borrow_rate_column in df.columns:
+        flash_open_close_fee = 0.0015 * position_size
         flash_borrow_rates = df[flash_borrow_rate_column]
         flash_total_borrow_rate = flash_borrow_rates.sum() / 100  # Convert percentage to decimal
         flash_variable_fees = flash_total_borrow_rate * position_size
+        flash_total_fees = (2 * flash_open_close_fee) + flash_variable_fees
     else:
         st.warning(f"Could not find borrow rate data for {selected_asset} in Flash Trade. Using 0 for calculations.")
         flash_variable_fees = 0
+        flash_open_close_fee = 0
         flash_borrow_rates = pd.Series([0] * len(df))
-    flash_total_fees = (2 * flash_open_close_fee) + (2 * flash_swap_fee) + flash_variable_fees
-
+        flash_total_fees = 0
+    
     # Jup Perps calculations
     if selected_asset == 'SOL':
         jup_trading_fee_coefficient = 0.0005 + (position_size / 1_000_000_000)
@@ -88,65 +97,68 @@ def calculate_fees(df, selected_asset, initial_capital, leverage, asgard_borrow_
     else:
         jup_trading_fee_coefficient = 0.0005  # Default for other assets
     
-    jup_open_fee = jup_trading_fee_coefficient * position_size
-    jup_close_fee = 0.0007 * position_size
+
     jup_borrow_rate_column = f'jupPerp.{selected_asset.lower()}Token.HourlyBorrowRate' # HourlyBorrowRate is in percentage
     if jup_borrow_rate_column in df.columns:
+        jup_open_fee = jup_trading_fee_coefficient * position_size
+        jup_close_fee = 0.0007 * position_size
         jup_borrow_rates = df[jup_borrow_rate_column]
         jup_total_borrow_rate = jup_borrow_rates.sum() / 100  # Convert percentage to decimal
         jup_variable_fees = jup_total_borrow_rate * position_size
+        jup_total_fees = jup_open_fee + jup_close_fee + jup_variable_fees
     else:
         st.warning(f"Could not find borrow rate data for {selected_asset} in Jup Perps. Using 0 for calculations.")
         jup_variable_fees = 0
+        jup_open_fee = 0
+        jup_close_fee = 0
         jup_borrow_rates = pd.Series([0] * len(df))
-    jup_total_fees = jup_open_fee + jup_close_fee + jup_variable_fees
+        jup_total_fees = 0
 
     # Asgard (MarginFi) calculations
-    asgard_open_close_fee = 0.0007 * position_size
     asgard_deposit_rate_column = f'marginfi.{selected_asset.lower()}Token.depositIRate' # depositIRate is in decimals
     asgard_borrow_rate_column = f'marginfi.{asgard_borrow_asset.lower()}Token.borrowIRate' # borrowIRate is in decimals
     if asgard_deposit_rate_column in df.columns and asgard_borrow_rate_column in df.columns:
+        asgard_open_close_fee = 0.0007 * position_size
         asgard_deposit_rates = df[asgard_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
         asgard_borrow_rates = df[asgard_borrow_rate_column] / (365 * 24) * 100 # Convert annual decimals to hourly percentage
         asgard_net_rates = asgard_borrow_rates - (asgard_borrow_rates / leverage) - asgard_deposit_rates
-        asgard_actual_net_rates = asgard_borrow_rates - (asgard_borrow_rates / leverage) - asgard_deposit_rates
-        asgard_total_actual_net_rate = asgard_actual_net_rates.sum() / 100  # Convert percentage to decimal
-        asgard_variable_fees = asgard_total_actual_net_rate * position_size
+        asgard_total_net_rate = asgard_net_rates.sum() / 100  # Convert percentage to decimal
+        asgard_variable_fees = asgard_total_net_rate * position_size
+        asgard_total_fees = (2 * asgard_open_close_fee) + asgard_variable_fees
     else:
         st.warning(f"Could not find rate data for Asgard (MarginFi). Using 0 for calculations.")
+        asgard_open_close_fee = 0
         asgard_variable_fees = 0
         asgard_net_rates = pd.Series([0] * len(df))
-        asgard_actual_net_rates = pd.Series([0] * len(df))
-    asgard_total_fees = (2 * asgard_open_close_fee) + asgard_variable_fees
+        asgard_total_fees = 0
 
     # Asgard (Kamino) calculations
     kamino_open_close_fee = 0.0007 * position_size
     kamino_deposit_rate_column = f'kamino.{selected_asset.lower()}Token.depositIRate' # depositIRate is in decimals
     kamino_borrow_rate_column = f'kamino.{asgard_borrow_asset.lower()}Token.borrowIRate' # borrowIRate is in decimals
     if kamino_deposit_rate_column in df.columns and kamino_borrow_rate_column in df.columns:
-        kamino_deposit_rates = df[kamino_deposit_rate_column] / (365 * 24) * 100  # Convert annual decimals to hourly percentage
-        kamino_borrow_rates = df[kamino_borrow_rate_column] / (365 * 24) * 100 # Convert annual decimals to hourly percentage
-        kamino_net_rates = kamino_borrow_rates - kamino_deposit_rates
-        kamino_actual_net_rates = kamino_borrow_rates - (kamino_deposit_rates * leverage)
-        kamino_total_actual_net_rate = kamino_actual_net_rates.sum() / 100  # Convert percentage to decimal
-        kamino_variable_fees = kamino_total_actual_net_rate * initial_capital
+        kamino_deposit_rates = df[kamino_deposit_rate_column] / (365 * 24) * 100
+        kamino_borrow_rates = df[kamino_borrow_rate_column] / (365 * 24) * 100
+        kamino_net_rates = kamino_borrow_rates - (kamino_borrow_rates / leverage) - kamino_deposit_rates
+        kamino_total_net_rate = kamino_net_rates.sum() / 100
+        kamino_variable_fees = kamino_total_net_rate * position_size
+        kamino_total_fees = (2 * kamino_open_close_fee) + kamino_variable_fees
     else:
         st.warning(f"Could not find rate data for Asgard (Kamino). Using 0 for calculations.")
         kamino_variable_fees = 0
         kamino_net_rates = pd.Series([0] * len(df))
-        kamino_actual_net_rates = pd.Series([0] * len(df))
-    kamino_total_fees = (2 * kamino_open_close_fee) + kamino_variable_fees
+        kamino_total_fees = 0
 
     # Create time series for variable fees and total fees
     timestamps = pd.to_datetime(df['createdAt'])
     drift_variable_fees_series = drift_funding_rates.cumsum() / 100 * position_size
     flash_variable_fees_series = flash_borrow_rates.cumsum() / 100 * position_size
     jup_variable_fees_series = jup_borrow_rates.cumsum() / 100 * position_size
-    asgard_variable_fees_series = asgard_actual_net_rates.cumsum() / 100 * initial_capital
-    kamino_variable_fees_series = kamino_actual_net_rates.cumsum() / 100 * initial_capital
+    asgard_variable_fees_series = asgard_net_rates.cumsum() / 100 * initial_capital
+    kamino_variable_fees_series = kamino_net_rates.cumsum() / 100 * initial_capital
 
     drift_total_fees_series = drift_variable_fees_series + (2 * drift_open_close_fee)
-    flash_total_fees_series = flash_variable_fees_series + (2 * flash_open_close_fee) + (2 * flash_swap_fee)
+    flash_total_fees_series = flash_variable_fees_series + (2 * flash_open_close_fee)
     jup_total_fees_series = jup_variable_fees_series + jup_open_fee + jup_close_fee
     asgard_total_fees_series = asgard_variable_fees_series + (2 * asgard_open_close_fee)
     kamino_total_fees_series = kamino_variable_fees_series + (2 * kamino_open_close_fee)
@@ -171,9 +183,9 @@ def calculate_fees(df, selected_asset, initial_capital, leverage, asgard_borrow_
 
     return {
         'Exchange': ['Drift', 'Flash Trade', 'Jup Perps', 'Asgard (MarginFi)', 'Asgard (Kamino)'],
-        'Open Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_open_fee, asgard_open_close_fee, kamino_open_close_fee],
+        'Open Fees': [drift_open_close_fee, flash_open_close_fee, jup_open_fee, asgard_open_close_fee, kamino_open_close_fee],
         'Variable Fees': [drift_variable_fees, flash_variable_fees, jup_variable_fees, asgard_variable_fees, kamino_variable_fees],
-        'Close Fees': [drift_open_close_fee, flash_open_close_fee + flash_swap_fee, jup_close_fee, asgard_open_close_fee, kamino_open_close_fee],
+        'Close Fees': [drift_open_close_fee, flash_open_close_fee, jup_close_fee, asgard_open_close_fee, kamino_open_close_fee],
         'Total Fees': [drift_total_fees, flash_total_fees, jup_total_fees, asgard_total_fees, kamino_total_fees]
     }, asgard_net_rates, kamino_net_rates, variable_fees_df, total_fees_df
 
