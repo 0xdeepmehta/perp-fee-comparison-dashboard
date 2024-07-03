@@ -67,11 +67,78 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
             close_fee = open_fee
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
+            return open_fee, variable_fees, close_fee, total_fees, rates, data_available, deposit_rates, borrow_rates
         else:
             data_available = False
             st.warning(f"Could not find rate data for Asgard ({exchange.capitalize()}). Using 0 for calculations.")
+            return open_fee, variable_fees, close_fee, total_fees, rates, data_available, None, None
     
     return open_fee, variable_fees, close_fee, total_fees, rates, data_available
+
+def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage):
+    st.subheader(f"Debug: Asgard ({exchange.capitalize()}) Calculations")
+    
+    deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
+    borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
+    
+    st.write(f"Asset: {asset}")
+    st.write(f"Borrow Asset: {asgard_borrow_asset}")
+    st.write(f"Position Size: ${position_size:.2f}")
+    st.write(f"Leverage: {leverage}x")
+    
+    if deposit_column in df.columns and borrow_column in df.columns:
+        yearly_deposit_rates = df[deposit_column] * 100  # Convert to percentage
+        yearly_borrow_rates = df[borrow_column] * 100  # Convert to percentage
+        deposit_rates = df[deposit_column] / (365 * 24) * 100
+        borrow_rates = df[borrow_column] / (365 * 24) * 100
+        net_rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
+        hourly_fees = net_rates / 100 * position_size
+        
+        st.write("Rates and Fees:")
+        debug_df = pd.DataFrame({
+            'Timestamp': df['createdAt'],
+            'Yearly Deposit Rate (%)': yearly_deposit_rates,
+            'Yearly Borrow Rate (%)': yearly_borrow_rates,
+            'Hourly Deposit Rate (%)': deposit_rates,
+            'Hourly Borrow Rate (%)': borrow_rates,
+            'Hourly Net Rate (%)': net_rates,
+            'Hourly Fees ($)': hourly_fees
+        })
+        st.dataframe(debug_df.style.format({
+            'Yearly Deposit Rate (%)': '{:.6f}',
+            'Yearly Borrow Rate (%)': '{:.6f}',
+            'Hourly Deposit Rate (%)': '{:.6f}',
+            'Hourly Borrow Rate (%)': '{:.6f}',
+            'Hourly Net Rate (%)': '{:.6f}',
+            'Hourly Fees ($)': '{:.6f}'
+        }))
+        
+        st.write(f"Average Yearly Deposit Rate: {yearly_deposit_rates.mean():.6f}%")
+        st.write(f"Average Yearly Borrow Rate: {yearly_borrow_rates.mean():.6f}%")
+        st.write(f"Average Hourly Deposit Rate: {deposit_rates.mean():.6f}%")
+        st.write(f"Average Hourly Borrow Rate: {borrow_rates.mean():.6f}%")
+        st.write(f"Average Hourly Net Rate: {net_rates.mean():.6f}%")
+        st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
+        
+        open_fee = 0.0007 * position_size
+        close_fee = open_fee
+        variable_fees = hourly_fees.sum()
+        total_fees = open_fee + close_fee + variable_fees
+        
+        st.write(f"Open Fee: ${open_fee:.6f}")
+        st.write(f"Close Fee: ${close_fee:.6f}")
+        st.write(f"Total Variable Fees: ${variable_fees:.6f}")
+        st.write(f"Total Fees: ${total_fees:.6f}")
+        
+        st.subheader("Rates Over Time")
+        rates_chart_df = debug_df.set_index('Timestamp')[['Hourly Deposit Rate (%)', 'Hourly Borrow Rate (%)', 'Hourly Net Rate (%)']]
+        st.line_chart(rates_chart_df)
+        
+        st.subheader("Hourly Fees Over Time")
+        st.line_chart(debug_df.set_index('Timestamp')[['Hourly Fees ($)']])
+    else:
+        st.write("Required data not found in the dataframe.")
+
 
 # Streamlit UI setup
 st.title('Multi-Exchange Fee Comparison')
@@ -159,7 +226,7 @@ if st.sidebar.button('Calculate Fees'):
 
         for ex in exchanges:
             if fees_data[ex][5]:  # If data is available
-                open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex]
+                open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex][:6]
                 
                 # Start with open fee
                 fees_series = pd.Series(open_fee, index=total_fees_df.index)
@@ -177,3 +244,8 @@ if st.sidebar.button('Calculate Fees'):
             st.line_chart(total_fees_df)
         else:
             st.write("No data available for total fees over time")
+
+        # Debug Asgard calculations
+        for ex in ['marginfi', 'kamino']:
+            if fees_data[ex][5]:  # If data is available
+                debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE)
