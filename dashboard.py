@@ -140,6 +140,74 @@ def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position
         st.write("Required data not found in the dataframe.")
 
 
+def debug_drift_calculations(df, asset, position_size):
+    st.subheader(f"Debug: Drift Calculations for {asset}")
+    
+    funding_column = f'drift.{asset}Perp.driftHourlyFunding'
+    
+    st.write(f"Asset: {asset}")
+    st.write(f"Position Size: ${position_size:.2f}")
+    
+    if funding_column in df.columns:
+        funding_rates = df[funding_column]
+        hourly_fees = funding_rates / 100 * position_size
+        
+        st.write("Funding Rates and Fees:")
+        debug_df = pd.DataFrame({
+            'Timestamp': df['createdAt'],
+            'Hourly Funding Rate (%)': funding_rates,
+            'Hourly Fees ($)': hourly_fees
+        })
+        st.dataframe(debug_df.style.format({
+            'Hourly Funding Rate (%)': '{:.6f}',
+            'Hourly Fees ($)': '{:.6f}'
+        }))
+        
+        st.write(f"Average Hourly Funding Rate: {funding_rates.mean():.6f}%")
+        st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
+        
+        open_fee = 0.001 * position_size
+        close_fee = open_fee
+        variable_fees = hourly_fees.sum()
+        total_fees = open_fee + close_fee + variable_fees
+        
+        st.write(f"Open Fee: ${open_fee:.6f}")
+        st.write(f"Close Fee: ${close_fee:.6f}")
+        st.write(f"Total Variable Fees: ${variable_fees:.6f}")
+        st.write(f"Total Fees: ${total_fees:.6f}")
+        
+        st.subheader("Funding Rates Over Time")
+        st.line_chart(debug_df.set_index('Timestamp')[['Hourly Funding Rate (%)']])
+        
+        st.subheader("Hourly Fees Over Time")
+        st.line_chart(debug_df.set_index('Timestamp')[['Hourly Fees ($)']])
+    else:
+        st.write(f"Required data not found in the dataframe for {asset} on Drift.")
+
+def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
+    if exchange == 'drift':
+        funding_column = f'drift.{asset}Perp.driftHourlyFunding'
+        if funding_column in df.columns:
+            return df[funding_column] / 100 * position_size
+    elif exchange == 'flash':
+        borrow_column = f'flashPerp.{asset.lower()}Token.HourlyBorrowRate'
+        if borrow_column in df.columns:
+            return df[borrow_column] / 100 * position_size
+    elif exchange == 'jup':
+        borrow_column = f'jupPerp.{asset.lower()}Token.HourlyBorrowRate'
+        if borrow_column in df.columns:
+            return df[borrow_column] / 100 * position_size
+    elif exchange in ['marginfi', 'kamino']:
+        deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
+        borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
+        if deposit_column in df.columns and borrow_column in df.columns:
+            deposit_rates = df[deposit_column] / (365 * 24) * 100
+            borrow_rates = df[borrow_column] / (365 * 24) * 100
+            net_rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
+            return net_rates / 100 * position_size
+    return pd.Series([0] * len(df))  # Return a series of zeros if data is not available
+
+
 # Streamlit UI setup
 st.title('Multi-Exchange Fee Comparison')
 
@@ -213,13 +281,27 @@ if st.sidebar.button('Calculate Fees'):
         else:
             st.write("No data available for rates over time")
         
-        st.subheader("Variable Fees Over Time")
-        variable_fees_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4].cumsum() / 100 * position_size for ex in exchanges if fees_data[ex][5]})
-        if not variable_fees_df.empty:
-            variable_fees_df.index = pd.to_datetime(df['createdAt'])
-            st.line_chart(variable_fees_df)
-        else:
-            st.write("No data available for variable fees over time")
+        # Create hourly variable fees chart for all exchanges
+        st.subheader("Hourly Variable Fees Comparison")
+        hourly_fees_df = pd.DataFrame({
+            exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET)
+            for ex in exchanges
+        })
+        hourly_fees_df.index = pd.to_datetime(df['createdAt'])
+        
+        # Display statistics
+        st.write("Average Hourly Variable Fees:")
+        for ex in exchanges:
+            avg_fee = hourly_fees_df[exchange_names[ex]].mean()
+            st.write(f"{exchange_names[ex]}: ${avg_fee:.6f}")
+        
+        # Create and display the chart
+        st.line_chart(hourly_fees_df)
+
+        # Create and display cumulative variable fees chart
+        st.subheader("Cumulative Variable Fees Comparison")
+        cumulative_fees_df = hourly_fees_df.cumsum()
+        st.line_chart(cumulative_fees_df)
         
         st.subheader("Total Fees Over Time")
         total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
@@ -245,6 +327,10 @@ if st.sidebar.button('Calculate Fees'):
         else:
             st.write("No data available for total fees over time")
 
+        # Debug Drift calculations
+        if fees_data['drift'][5]:  # If data is available for Drift
+            debug_drift_calculations(df, SELECTED_ASSET, position_size)
+        
         # Debug Asgard calculations
         for ex in ['marginfi', 'kamino']:
             if fees_data[ex][5]:  # If data is available
