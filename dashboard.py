@@ -155,10 +155,24 @@ if st.sidebar.button('Calculate Fees'):
             st.write("No data available for variable fees over time")
         
         st.subheader("Total Fees Over Time")
-        total_fees_df = variable_fees_df.copy() if not variable_fees_df.empty else pd.DataFrame()
+        total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
+
         for ex in exchanges:
-            if fees_data[ex][5]:
-                total_fees_df[exchange_names[ex]] = total_fees_df.get(exchange_names[ex], 0) + (fees_data[ex][0] + fees_data[ex][2])
+            if fees_data[ex][5]:  # If data is available
+                open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex]
+                
+                # Start with open fee
+                fees_series = pd.Series(open_fee, index=total_fees_df.index)
+                
+                # Add variable fees cumulatively
+                cumulative_variable_fees = (rates.cumsum() / 100 * position_size).values
+                fees_series += cumulative_variable_fees
+                
+                # Add close fee at the end
+                fees_series.iloc[-1] += close_fee
+                
+                total_fees_df[exchange_names[ex]] = fees_series
+
         if not total_fees_df.empty:
             st.line_chart(total_fees_df)
         else:
