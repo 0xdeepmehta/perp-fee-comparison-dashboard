@@ -239,103 +239,102 @@ st.write(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
 st.write(f"Leverage: {LEVERAGE}x")
 st.write(f"Asgard Borrow Asset: {ASGARD_BORROW_ASSET}")
 
-# Calculate fees when button is clicked
-if st.sidebar.button('Calculate Fees'):
-    data = fetch_data(start_date_str, end_date_str)
-    if data:
-        st.success("Data fetched successfully!")
-        df = pd.json_normalize(data)
-        position_size = INITIAL_CAPITAL * LEVERAGE
-        
-        exchanges = ['drift', 'flash', 'jup', 'marginfi', 'kamino']
-        exchange_names = {'drift': 'Drift', 'flash': 'Flash Trade', 'jup': 'Jup Perps', 
-                          'marginfi': 'Asgard (MarginFi)', 'kamino': 'Asgard (Kamino)'}
-        fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET) for ex in exchanges}
-        
-        # Create and display fee comparison table
-        fee_df = pd.DataFrame({
-            'Exchange': [exchange_names[ex] for ex in exchanges],
-            'Open Fees': [fees_data[ex][0] for ex in exchanges],
-            'Variable Fees': [fees_data[ex][1] for ex in exchanges],
-            'Close Fees': [fees_data[ex][2] for ex in exchanges],
-            'Total Fees': [fees_data[ex][3] for ex in exchanges]
-        })
-        st.subheader("Fee Comparison")
-        st.table(fee_df.set_index('Exchange').style.format('${:.2f}'))
-        
-        # Display rate statistics
-        st.subheader("Rate Statistics")
-        cols = st.columns(len(exchanges))
-        for i, ex in enumerate(exchanges):
-            with cols[i]:
-                st.write(f"{exchange_names[ex]} Rates")
-                rates = fees_data[ex][4]
-                if fees_data[ex][5]:  # Check if data is available
-                    st.write(f"Average: {rates.mean():.4f}%")
-                    st.write(f"Total: {rates.sum():.4f}%")
-                    st.write(f"Cumulative Effect: {(rates.sum() / 100) * 100:.4f}%")
-                else:
-                    st.write("No data available")
-        
-        # Create and display charts
-        st.subheader("Rates Over Time")
-        rates_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4] for ex in exchanges if fees_data[ex][5]})
-        if not rates_df.empty:
-            st.line_chart(rates_df)
-        else:
-            st.write("No data available for rates over time")
-        
-        # Create hourly variable fees chart for all exchanges
-        st.subheader("Hourly Variable Fees Comparison")
-        hourly_fees_df = pd.DataFrame({
-            exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET)
-            for ex in exchanges
-        })
-        hourly_fees_df.index = pd.to_datetime(df['createdAt'])
-        
-        # Display statistics
-        st.write("Average Hourly Variable Fees:")
-        for ex in exchanges:
-            avg_fee = hourly_fees_df[exchange_names[ex]].mean()
-            st.write(f"{exchange_names[ex]}: ${avg_fee:.6f}")
-        
-        # Create and display the chart
-        st.line_chart(hourly_fees_df)
+# Automatically calculate fees
+data = fetch_data(start_date_str, end_date_str)
+if data:
+    st.success("Data fetched successfully!")
+    df = pd.json_normalize(data)
+    position_size = INITIAL_CAPITAL * LEVERAGE
+    
+    exchanges = ['drift', 'flash', 'jup', 'marginfi', 'kamino']
+    exchange_names = {'drift': 'Drift', 'flash': 'Flash Trade', 'jup': 'Jup Perps', 
+                      'marginfi': 'Asgard (MarginFi)', 'kamino': 'Asgard (Kamino)'}
+    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET) for ex in exchanges}
+    
+    # Create and display fee comparison table
+    fee_df = pd.DataFrame({
+        'Exchange': [exchange_names[ex] for ex in exchanges],
+        'Open Fees': [fees_data[ex][0] for ex in exchanges],
+        'Variable Fees': [fees_data[ex][1] for ex in exchanges],
+        'Close Fees': [fees_data[ex][2] for ex in exchanges],
+        'Total Fees': [fees_data[ex][3] for ex in exchanges]
+    })
+    st.subheader("Fee Comparison")
+    st.table(fee_df.set_index('Exchange').style.format('${:.2f}'))
+    
+    # Display rate statistics
+    st.subheader("Rate Statistics")
+    cols = st.columns(len(exchanges))
+    for i, ex in enumerate(exchanges):
+        with cols[i]:
+            st.write(f"{exchange_names[ex]} Rates")
+            rates = fees_data[ex][4]
+            if fees_data[ex][5]:  # Check if data is available
+                st.write(f"Average: {rates.mean():.4f}%")
+                st.write(f"Total: {rates.sum():.4f}%")
+                st.write(f"Cumulative Effect: {(rates.sum() / 100) * 100:.4f}%")
+            else:
+                st.write("No data available")
+    
+    # Create and display charts
+    st.subheader("Rates Over Time")
+    rates_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4] for ex in exchanges if fees_data[ex][5]})
+    if not rates_df.empty:
+        st.line_chart(rates_df)
+    else:
+        st.write("No data available for rates over time")
+    
+    # Create hourly variable fees chart for all exchanges
+    st.subheader("Hourly Variable Fees Comparison")
+    hourly_fees_df = pd.DataFrame({
+        exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET)
+        for ex in exchanges
+    })
+    hourly_fees_df.index = pd.to_datetime(df['createdAt'])
+    
+    # Display statistics
+    st.write("Average Hourly Variable Fees:")
+    for ex in exchanges:
+        avg_fee = hourly_fees_df[exchange_names[ex]].mean()
+        st.write(f"{exchange_names[ex]}: ${avg_fee:.6f}")
+    
+    # Create and display the chart
+    st.line_chart(hourly_fees_df)
 
-        # Create and display cumulative variable fees chart
-        st.subheader("Cumulative Variable Fees Comparison")
-        cumulative_fees_df = hourly_fees_df.cumsum()
-        st.line_chart(cumulative_fees_df)
-        
-        st.subheader("Total Fees Over Time")
-        total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
+    # Create and display cumulative variable fees chart
+    st.subheader("Cumulative Variable Fees Comparison")
+    cumulative_fees_df = hourly_fees_df.cumsum()
+    st.line_chart(cumulative_fees_df)
+    
+    st.subheader("Total Fees Over Time")
+    total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
 
-        for ex in exchanges:
-            if fees_data[ex][5]:  # If data is available
-                open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex][:6]
-                
-                # Start with open fee
-                fees_series = pd.Series(open_fee, index=total_fees_df.index)
-                
-                # Add variable fees cumulatively
-                cumulative_variable_fees = (rates.cumsum() / 100 * position_size).values
-                fees_series += cumulative_variable_fees
-                
-                # Add close fee at the end
-                fees_series.iloc[-1] += close_fee
-                
-                total_fees_df[exchange_names[ex]] = fees_series
+    for ex in exchanges:
+        if fees_data[ex][5]:  # If data is available
+            open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex][:6]
+            
+            # Start with open fee
+            fees_series = pd.Series(open_fee, index=total_fees_df.index)
+            
+            # Add variable fees cumulatively
+            cumulative_variable_fees = (rates.cumsum() / 100 * position_size).values
+            fees_series += cumulative_variable_fees
+            
+            # Add close fee at the end
+            fees_series.iloc[-1] += close_fee
+            
+            total_fees_df[exchange_names[ex]] = fees_series
 
-        if not total_fees_df.empty:
-            st.line_chart(total_fees_df)
-        else:
-            st.write("No data available for total fees over time")
+    if not total_fees_df.empty:
+        st.line_chart(total_fees_df)
+    else:
+        st.write("No data available for total fees over time")
 
-        # Debug Drift calculations
-        if fees_data['drift'][5]:  # If data is available for Drift
-            debug_drift_calculations(df, SELECTED_ASSET, position_size)
-        
-        # Debug Asgard calculations
-        for ex in ['marginfi', 'kamino']:
-            if fees_data[ex][5]:  # If data is available
-                debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE)
+    # Debug Drift calculations
+    if fees_data['drift'][5]:  # If data is available for Drift
+        debug_drift_calculations(df, SELECTED_ASSET, position_size)
+    
+    # Debug Asgard calculations
+    for ex in ['marginfi', 'kamino']:
+        if fees_data[ex][5]:  # If data is available
+            debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE)
