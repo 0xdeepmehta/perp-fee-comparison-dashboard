@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 # Constants
 ASSETS = ['SOL', 'ETH', 'BONK']
@@ -214,16 +215,19 @@ st.title('Multi-Exchange Fee Comparison')
 # Sidebar inputs
 with st.sidebar:
     st.header('User Inputs')
-    time_value = st.number_input('Enter number of time units', min_value=1, value=7, step=1)
-    time_unit = st.selectbox('Select time unit', ['Hours', 'Days', 'Months'], index=1)
-    SELECTED_ASSET = st.selectbox('Select Asset', ASSETS)
+    time_value = st.number_input('Enter number of time units', min_value=1, value=1, step=1)
+    time_unit = st.selectbox('Select time unit', ['Hours', 'Days', 'Months'], index=2)
+    SELECTED_ASSET = st.selectbox('Select Asset', ASSETS, index=2)
     INITIAL_CAPITAL = st.number_input('Initial Capital (USD)', min_value=1.0, value=10000.0, step=100.0)
     LEVERAGE = st.selectbox('Select Leverage', LEVERAGE_OPTIONS, index=1)
     ASGARD_BORROW_ASSET = st.selectbox('Select Asgard Borrow Asset', ASGARD_BORROW_ASSETS)
 
 # Calculate date range
 end_date = datetime.now()
-start_date = end_date - timedelta(**{time_unit.lower(): time_value})
+if time_unit == 'Months':
+    start_date = end_date - relativedelta(months=time_value)
+else:
+    start_date = end_date - timedelta(**{time_unit.lower(): time_value})
 start_date_str, end_date_str = start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
 
 # Display selected inputs
