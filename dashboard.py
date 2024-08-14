@@ -18,7 +18,7 @@ def fetch_data(start_date, end_date):
     st.error(f"Failed to fetch data: {response.status_code}")
     return None
 
-def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
+def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset, asgard_open_fee, asgard_close_fee):
     """Calculate fees for a specific exchange."""
     open_fee = close_fee = variable_fees = total_fees = 0
     rates = pd.Series([0] * len(df))
@@ -74,8 +74,8 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
             deposit_rates = df[deposit_column] / (365 * 24) * 100
             borrow_rates = df[borrow_column] / (365 * 24) * 100
             rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
-            open_fee = 0.0007 * position_size
-            close_fee = open_fee
+            open_fee = asgard_open_fee * position_size
+            close_fee = asgard_close_fee * position_size
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
         else:
@@ -84,7 +84,7 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
     
     return open_fee, variable_fees, close_fee, total_fees, rates, data_available, discount
 
-def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage):
+def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage, asgard_open_fee, asgard_close_fee):
     st.subheader(f"Debug: Asgard ({exchange.capitalize()}) Calculations")
     
     deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
@@ -94,6 +94,8 @@ def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position
     st.write(f"Borrow Asset: {asgard_borrow_asset}")
     st.write(f"Position Size: ${position_size:.2f}")
     st.write(f"Leverage: {leverage}x")
+    st.write(f"Opening Fee: {asgard_open_fee*100:.2f}%")
+    st.write(f"Closing Fee: {asgard_close_fee*100:.2f}%")
     
     if deposit_column in df.columns and borrow_column in df.columns:
         yearly_deposit_rates = df[deposit_column] * 100  # Convert to percentage
@@ -129,8 +131,8 @@ def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position
         st.write(f"Average Hourly Net Rate: {net_rates.mean():.6f}%")
         st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
         
-        open_fee = 0.0007 * position_size
-        close_fee = open_fee
+        open_fee = asgard_open_fee * position_size
+        close_fee = asgard_close_fee * position_size
         variable_fees = hourly_fees.sum()
         total_fees = open_fee + close_fee + variable_fees
         
@@ -147,7 +149,6 @@ def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position
         st.line_chart(debug_df.set_index('Timestamp')[['Hourly Fees ($)']])
     else:
         st.write("Required data not found in the dataframe.")
-
 
 def debug_drift_calculations(df, asset, position_size):
     st.subheader(f"Debug: Drift Calculations for {asset}")
@@ -175,7 +176,6 @@ def debug_drift_calculations(df, asset, position_size):
         st.write(f"Average Hourly Funding Rate: {funding_rates.mean():.6f}%")
         st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
         
-        # New code to account for the 75% discount
         base_fee_rate = 0.001  # 0.1%
         if asset in ['SOL', 'ETH', 'BTC']:
             fee_rate = base_fee_rate * 0.25  # 75% discount
@@ -202,7 +202,6 @@ def debug_drift_calculations(df, asset, position_size):
     else:
         st.write(f"Required data not found in the dataframe for {asset} on Drift.")
 
-
 def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
     if exchange == 'drift':
         funding_column = f'drift.{asset}Perp.driftHourlyFunding'
@@ -226,7 +225,6 @@ def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage,
             return net_rates / 100 * position_size
     return pd.Series([0] * len(df))  # Return a series of zeros if data is not available
 
-
 # Streamlit UI setup
 st.title('Multi-Exchange Fee Comparison')
 
@@ -239,6 +237,11 @@ with st.sidebar:
     INITIAL_CAPITAL = st.number_input('Initial Capital (USD)', min_value=1.0, value=10000.0, step=100.0)
     LEVERAGE = st.selectbox('Select Leverage', LEVERAGE_OPTIONS, index=1)
     ASGARD_BORROW_ASSET = st.selectbox('Select Asgard Borrow Asset', ASGARD_BORROW_ASSETS)
+    
+    # New inputs for Asgard fees
+    st.subheader('Asgard Fees')
+    ASGARD_OPEN_FEE = st.number_input('Asgard Opening Fee (%)', min_value=0.0, max_value=100.0, value=0.06, step=0.01, format="%.2f") / 100
+    ASGARD_CLOSE_FEE = st.number_input('Asgard Closing Fee (%)', min_value=0.0, max_value=100.0, value=0.06, step=0.01, format="%.2f") / 100
 
 # Calculate date range
 end_date = datetime.now()
@@ -256,6 +259,8 @@ st.write(f"Asset: {SELECTED_ASSET}")
 st.write(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
 st.write(f"Leverage: {LEVERAGE}x")
 st.write(f"Asgard Borrow Asset: {ASGARD_BORROW_ASSET}")
+st.write(f"Asgard Opening Fee: {ASGARD_OPEN_FEE*100:.2f}%")
+st.write(f"Asgard Closing Fee: {ASGARD_CLOSE_FEE*100:.2f}%")
 
 # Automatically calculate fees
 data = fetch_data(start_date_str, end_date_str)
@@ -267,7 +272,7 @@ if data:
     exchanges = ['drift', 'flash', 'jup', 'marginfi', 'kamino']
     exchange_names = {'drift': 'Drift', 'flash': 'Flash Trade', 'jup': 'Jup Perps', 
                       'marginfi': 'Asgard (MarginFi)', 'kamino': 'Asgard (Kamino)'}
-    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET) for ex in exchanges}
+    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE) for ex in exchanges}
     
     # Create and display fee comparison table
     fee_df = pd.DataFrame({
@@ -364,4 +369,4 @@ if data:
     # Debug Asgard calculations
     for ex in ['marginfi', 'kamino']:
         if fees_data[ex][5]:  # If data is available
-            debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE)
+            debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE)
