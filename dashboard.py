@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 # Constants
 ASSETS = ['SOL', 'ETH', 'BONK']
 LEVERAGE_OPTIONS = [1.5, 2.0, 3.0, 4.0, 5.0]
-ASGARD_BORROW_ASSETS = ['USDC', 'USDT']
+ASGARD_BORROW_ASSETS = ['USDC', 'USDT', 'ETH']
 API_URL = "http://159.223.14.10:6969/fee-comparisons"
 
 def fetch_data(start_date, end_date):
