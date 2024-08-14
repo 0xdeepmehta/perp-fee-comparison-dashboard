@@ -84,8 +84,14 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
             deposit_rates = df[deposit_column] / (365 * 24) * 100
             borrow_rates = df[borrow_column] / (365 * 24) * 100
             rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
-            open_fee = asgard_open_fee * position_size
-            close_fee = asgard_close_fee * position_size
+            # Apply 75% discount for SOL, BTC, and ETH
+            if asset in ['SOL', 'ETH', 'BTC']:
+                open_fee = asgard_open_fee * position_size * 0.25  # 75% discount
+                close_fee = asgard_close_fee * position_size * 0.25  # 75% discount
+                discount = '75%'
+            else:
+                open_fee = asgard_open_fee * position_size
+                close_fee = asgard_close_fee * position_size
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
         else:
