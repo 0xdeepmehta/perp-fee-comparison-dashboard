@@ -23,13 +23,23 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
     open_fee = close_fee = variable_fees = total_fees = 0
     rates = pd.Series([0] * len(df))
     data_available = True
+    discount = None
 
     if exchange == 'drift':
         funding_column = f'drift.{asset}Perp.driftHourlyFunding'
         if funding_column in df.columns:
             rates = df[funding_column]
-            open_fee = 0.001 * position_size
-            close_fee = open_fee
+            base_fee_rate = 0.001
+            
+            if asset in ['SOL', 'ETH', 'BTC']:
+                discounted_fee_rate = base_fee_rate * 0.25  # 75% discount
+                open_fee = discounted_fee_rate * position_size
+                close_fee = open_fee
+                discount = '75%'
+            else:
+                open_fee = base_fee_rate * position_size
+                close_fee = open_fee
+            
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
         else:
@@ -68,13 +78,11 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
             close_fee = open_fee
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
-            return open_fee, variable_fees, close_fee, total_fees, rates, data_available, deposit_rates, borrow_rates
         else:
             data_available = False
             st.warning(f"Could not find rate data for Asgard ({exchange.capitalize()}). Using 0 for calculations.")
-            return open_fee, variable_fees, close_fee, total_fees, rates, data_available, None, None
     
-    return open_fee, variable_fees, close_fee, total_fees, rates, data_available
+    return open_fee, variable_fees, close_fee, total_fees, rates, data_available, discount
 
 def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage):
     st.subheader(f"Debug: Asgard ({exchange.capitalize()}) Calculations")
@@ -167,7 +175,16 @@ def debug_drift_calculations(df, asset, position_size):
         st.write(f"Average Hourly Funding Rate: {funding_rates.mean():.6f}%")
         st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
         
-        open_fee = 0.001 * position_size
+        # New code to account for the 75% discount
+        base_fee_rate = 0.001  # 0.1%
+        if asset in ['SOL', 'ETH', 'BTC']:
+            fee_rate = base_fee_rate * 0.25  # 75% discount
+            st.write(f"Fee Rate (75% discounted): {fee_rate:.4f} ({fee_rate*100:.2f}%)")
+        else:
+            fee_rate = base_fee_rate
+            st.write(f"Fee Rate: {fee_rate:.4f} ({fee_rate*100:.2f}%)")
+        
+        open_fee = fee_rate * position_size
         close_fee = open_fee
         variable_fees = hourly_fees.sum()
         total_fees = open_fee + close_fee + variable_fees
@@ -184,6 +201,7 @@ def debug_drift_calculations(df, asset, position_size):
         st.line_chart(debug_df.set_index('Timestamp')[['Hourly Fees ($)']])
     else:
         st.write(f"Required data not found in the dataframe for {asset} on Drift.")
+
 
 def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
     if exchange == 'drift':
@@ -254,13 +272,22 @@ if data:
     # Create and display fee comparison table
     fee_df = pd.DataFrame({
         'Exchange': [exchange_names[ex] for ex in exchanges],
+        'Discount': ['None' if fees_data[ex][6] is None else fees_data[ex][6] for ex in exchanges],
         'Open Fees': [fees_data[ex][0] for ex in exchanges],
         'Variable Fees': [fees_data[ex][1] for ex in exchanges],
         'Close Fees': [fees_data[ex][2] for ex in exchanges],
         'Total Fees': [fees_data[ex][3] for ex in exchanges]
     })
+    fee_df = fee_df[['Exchange', 'Discount', 'Open Fees', 'Variable Fees', 'Close Fees', 'Total Fees']]
+    
     st.subheader("Fee Comparison")
-    st.table(fee_df.set_index('Exchange').style.format('${:.2f}'))
+    st.table(fee_df.set_index('Exchange').style.format({
+        'Open Fees': '${:.2f}',
+        'Variable Fees': '${:.2f}',
+        'Close Fees': '${:.2f}',
+        'Total Fees': '${:.2f}',
+        'Discount': '{}'
+    }))
     
     # Display rate statistics
     st.subheader("Rate Statistics")
