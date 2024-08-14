@@ -208,6 +208,53 @@ def debug_drift_calculations(df, asset, position_size):
     else:
         st.write(f"Required data not found in the dataframe for {asset} on Drift.")
 
+def debug_flash_calculations(df, asset, position_size):
+    st.subheader(f"Debug: Flash Trade Calculations for {asset}")
+    
+    borrow_column = f'flashPerp.{asset.lower()}Token.HourlyBorrowRate'
+    
+    st.write(f"Asset: {asset}")
+    st.write(f"Position Size: ${position_size:.2f}")
+    
+    if borrow_column in df.columns:
+        borrow_rates = df[borrow_column]
+        hourly_fees = borrow_rates / 100 * position_size
+        
+        st.write("Borrow Rates and Fees:")
+        debug_df = pd.DataFrame({
+            'Timestamp': df['createdAt'],
+            'Hourly Borrow Rate (%)': borrow_rates,
+            'Hourly Fees ($)': hourly_fees
+        })
+        st.dataframe(debug_df.style.format({
+            'Hourly Borrow Rate (%)': '{:.6f}',
+            'Hourly Fees ($)': '{:.6f}'
+        }))
+        
+        st.write(f"Average Hourly Borrow Rate: {borrow_rates.mean():.6f}%")
+        st.write(f"Average Hourly Fees: ${hourly_fees.mean():.6f}")
+        
+        fee_rate = 0.0015 if asset == 'BONK' else 0.0008
+        st.write(f"Fee Rate: {fee_rate:.4f} ({fee_rate*100:.2f}%)")
+        
+        open_fee = fee_rate * position_size
+        close_fee = open_fee
+        variable_fees = hourly_fees.sum()
+        total_fees = open_fee + close_fee + variable_fees
+        
+        st.write(f"Open Fee: ${open_fee:.6f}")
+        st.write(f"Close Fee: ${close_fee:.6f}")
+        st.write(f"Total Variable Fees: ${variable_fees:.6f}")
+        st.write(f"Total Fees: ${total_fees:.6f}")
+        
+        st.subheader("Borrow Rates Over Time")
+        st.line_chart(debug_df.set_index('Timestamp')[['Hourly Borrow Rate (%)']])
+        
+        st.subheader("Hourly Fees Over Time")
+        st.line_chart(debug_df.set_index('Timestamp')[['Hourly Fees ($)']])
+    else:
+        st.write(f"Required data not found in the dataframe for {asset} on Flash Trade.")
+
 def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
     if exchange == 'drift':
         funding_column = f'drift.{asset}Perp.driftHourlyFunding'
@@ -378,6 +425,10 @@ if data:
     # Debug Drift calculations
     if 'drift' in displayed_exchanges and fees_data['drift'][5]:
         debug_drift_calculations(df, SELECTED_ASSET, position_size)
+
+    # Debug Flash calculations
+    if 'flash' in displayed_exchanges and fees_data['flash'][5]:
+        debug_flash_calculations(df, SELECTED_ASSET, position_size)
 
     for ex in ['marginfi', 'kamino']:
         if ex in displayed_exchanges and fees_data[ex][5]:
