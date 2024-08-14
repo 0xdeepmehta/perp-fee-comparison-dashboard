@@ -10,6 +10,12 @@ LEVERAGE_OPTIONS = [1.5, 2.0, 3.0, 4.0, 5.0]
 ASGARD_BORROW_ASSETS = ['USDC', 'USDT', 'ETH']
 API_URL = "http://159.223.14.10:6969/fee-comparisons"
 
+def get_displayed_exchanges(borrow_asset):
+    if borrow_asset in ['USDC', 'USDT']:
+        return ['drift', 'flash', 'jup', 'marginfi', 'kamino']
+    else:
+        return ['marginfi', 'kamino']
+
 def fetch_data(start_date, end_date):
     """Fetch data from API."""
     response = requests.get(f"{API_URL}?from={start_date}&to={end_date}")
@@ -269,22 +275,29 @@ if data:
     df = pd.json_normalize(data)
     position_size = INITIAL_CAPITAL * LEVERAGE
     
-    exchanges = ['drift', 'flash', 'jup', 'marginfi', 'kamino']
-    exchange_names = {'drift': 'Drift', 'flash': 'Flash Trade', 'jup': 'Jup Perps', 
-                      'marginfi': 'Asgard (MarginFi)', 'kamino': 'Asgard (Kamino)'}
-    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE) for ex in exchanges}
+    displayed_exchanges = get_displayed_exchanges(ASGARD_BORROW_ASSET)
+
+    exchange_names = {
+        'drift': 'Drift', 
+        'flash': 'Flash Trade', 
+        'jup': 'Jup Perps', 
+        'marginfi': 'Asgard (MarginFi)', 
+        'kamino': 'Asgard (Kamino)'
+    }
+
+    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE) for ex in displayed_exchanges}
     
     # Create and display fee comparison table
     fee_df = pd.DataFrame({
-        'Exchange': [exchange_names[ex] for ex in exchanges],
-        'Discount': ['None' if fees_data[ex][6] is None else fees_data[ex][6] for ex in exchanges],
-        'Open Fees': [fees_data[ex][0] for ex in exchanges],
-        'Variable Fees': [fees_data[ex][1] for ex in exchanges],
-        'Close Fees': [fees_data[ex][2] for ex in exchanges],
-        'Total Fees': [fees_data[ex][3] for ex in exchanges]
+        'Exchange': [exchange_names[ex] for ex in displayed_exchanges],
+        'Discount': ['None' if fees_data[ex][6] is None else fees_data[ex][6] for ex in displayed_exchanges],
+        'Open Fees': [fees_data[ex][0] for ex in displayed_exchanges],
+        'Variable Fees': [fees_data[ex][1] for ex in displayed_exchanges],
+        'Close Fees': [fees_data[ex][2] for ex in displayed_exchanges],
+        'Total Fees': [fees_data[ex][3] for ex in displayed_exchanges]
     })
     fee_df = fee_df[['Exchange', 'Discount', 'Open Fees', 'Variable Fees', 'Close Fees', 'Total Fees']]
-    
+
     st.subheader("Fee Comparison")
     st.table(fee_df.set_index('Exchange').style.format({
         'Open Fees': '${:.2f}',
@@ -296,8 +309,8 @@ if data:
     
     # Display rate statistics
     st.subheader("Rate Statistics")
-    cols = st.columns(len(exchanges))
-    for i, ex in enumerate(exchanges):
+    cols = st.columns(len(displayed_exchanges))
+    for i, ex in enumerate(displayed_exchanges):
         with cols[i]:
             st.write(f"{exchange_names[ex]} Rates")
             rates = fees_data[ex][4]
@@ -310,7 +323,7 @@ if data:
     
     # Create and display charts
     st.subheader("Rates Over Time")
-    rates_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4] for ex in exchanges if fees_data[ex][5]})
+    rates_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4] for ex in displayed_exchanges if fees_data[ex][5]})
     if not rates_df.empty:
         st.line_chart(rates_df)
     else:
@@ -320,13 +333,13 @@ if data:
     st.subheader("Hourly Variable Fees Comparison")
     hourly_fees_df = pd.DataFrame({
         exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET)
-        for ex in exchanges
+        for ex in displayed_exchanges
     })
     hourly_fees_df.index = pd.to_datetime(df['createdAt'])
     
     # Display statistics
     st.write("Average Hourly Variable Fees:")
-    for ex in exchanges:
+    for ex in displayed_exchanges:
         avg_fee = hourly_fees_df[exchange_names[ex]].mean()
         st.write(f"{exchange_names[ex]}: ${avg_fee:.6f}")
     
@@ -341,7 +354,7 @@ if data:
     st.subheader("Total Fees Over Time")
     total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
 
-    for ex in exchanges:
+    for ex in displayed_exchanges:
         if fees_data[ex][5]:  # If data is available
             open_fee, variable_fees, close_fee, _, rates, _ = fees_data[ex][:6]
             
@@ -363,10 +376,9 @@ if data:
         st.write("No data available for total fees over time")
 
     # Debug Drift calculations
-    if fees_data['drift'][5]:  # If data is available for Drift
+    if 'drift' in displayed_exchanges and fees_data['drift'][5]:
         debug_drift_calculations(df, SELECTED_ASSET, position_size)
-    
-    # Debug Asgard calculations
+
     for ex in ['marginfi', 'kamino']:
-        if fees_data[ex][5]:  # If data is available
+        if ex in displayed_exchanges and fees_data[ex][5]:
             debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE)
