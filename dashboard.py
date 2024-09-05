@@ -24,17 +24,16 @@ def fetch_data(start_date, end_date):
     st.error(f"Failed to fetch data: {response.status_code}")
     return None
 
-def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset, asgard_open_fee, asgard_close_fee, direction):
+def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset, asgard_open_fee, asgard_close_fee):
     open_fee = close_fee = variable_fees = total_fees = 0
     rates = pd.Series([0] * len(df))
     data_available = True
     discount = None
-    direction_multiplier = 1 if direction == 'Long' else -1
 
     if exchange == 'drift':
         funding_column = f'drift.{asset}Perp.driftHourlyFunding'
         if funding_column in df.columns:
-            rates = df[funding_column] * direction_multiplier
+            rates = df[funding_column]
             base_fee_rate = 0.001
             
             if asset in ['SOL', 'ETH', 'BTC']:
@@ -54,7 +53,7 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
     elif exchange == 'flash':
         borrow_column = f'flashPerp.{asset.lower()}Token.HourlyBorrowRate'
         if borrow_column in df.columns:
-            rates = df[borrow_column] * direction_multiplier
+            rates = df[borrow_column]
             open_fee = (0.0015 if asset == 'BONK' else 0.0008) * position_size
             close_fee = open_fee
             variable_fees = rates.sum() / 100 * position_size
@@ -65,21 +64,17 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
     elif exchange == 'jup':
         borrow_column = f'jupPerp.{asset.lower()}Token.HourlyBorrowRate'
         if borrow_column in df.columns:
-            rates = df[borrow_column] * direction_multiplier
-            open_fee = (0.0007 + (position_size / (1e9 if asset == 'SOL' else 5e9))) * position_size
-            close_fee = (0.0007 + (position_size / (1e9 if asset == 'SOL' else 5e9))) * position_size
+            rates = df[borrow_column]
+            open_fee = 0.0006 * position_size
+            close_fee = 0.0006 * position_size
             variable_fees = rates.sum() / 100 * position_size
             total_fees = open_fee + close_fee + variable_fees
         else:
             data_available = False
             st.warning(f"Could not find borrow rate data for {asset} in Jup Perps. Using 0 for calculations.")
     elif exchange in ['marginfi', 'kamino']:  # Asgard (MarginFi or Kamino)
-        if direction == 'Long':
-            deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
-            borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
-        else:  # Short
-            deposit_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.depositIRate'
-            borrow_column = f'{exchange}.{asset.lower()}Token.borrowIRate'
+        deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
+        borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
         if deposit_column in df.columns and borrow_column in df.columns:
             deposit_rates = df[deposit_column] / (365 * 24) * 100
             borrow_rates = df[borrow_column] / (365 * 24) * 100
@@ -100,45 +95,39 @@ def calculate_exchange_fees(df, exchange, asset, position_size, leverage, asgard
     
     return open_fee, variable_fees, close_fee, total_fees, rates, data_available, discount
 
-def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset, direction):
-    direction_multiplier = 1 if direction == 'Long' else -1
+def calculate_hourly_variable_fees(df, exchange, asset, position_size, leverage, asgard_borrow_asset):
     if exchange == 'drift':
         funding_column = f'drift.{asset}Perp.driftHourlyFunding'
         if funding_column in df.columns:
-            return df[funding_column] * direction_multiplier / 100 * position_size
+            return df[funding_column] / 100 * position_size
     elif exchange == 'flash':
         borrow_column = f'flashPerp.{asset.lower()}Token.HourlyBorrowRate'
         if borrow_column in df.columns:
-            return df[borrow_column] * direction_multiplier / 100 * position_size
+            return df[borrow_column] / 100 * position_size
     elif exchange == 'jup':
         borrow_column = f'jupPerp.{asset.lower()}Token.HourlyBorrowRate'
         if borrow_column in df.columns:
-            return df[borrow_column] * direction_multiplier / 100 * position_size
+            return df[borrow_column] / 100 * position_size
     elif exchange in ['marginfi', 'kamino']:
         deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
         borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
         if deposit_column in df.columns and borrow_column in df.columns:
             deposit_rates = df[deposit_column] / (365 * 24) * 100
             borrow_rates = df[borrow_column] / (365 * 24) * 100
-            if direction == 'Long':
-                rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
-            else:  # Short
-                rates = deposit_rates - borrow_rates - (deposit_rates / leverage)
-            return rates * direction_multiplier / 100 * position_size
+            rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
+            return rates / 100 * position_size
     return pd.Series([0] * len(df))  # Return a series of zeros if data is not available
 
-def debug_drift_calculations(df, asset, position_size, direction):
-    st.subheader(f"Debug: Drift Calculations for {asset} ({direction})")
+def debug_drift_calculations(df, asset, position_size):
+    st.subheader(f"Debug: Drift Calculations for {asset}")
     
     funding_column = f'drift.{asset}Perp.driftHourlyFunding'
-    direction_multiplier = 1 if direction == 'Long' else -1
     
     st.write(f"Asset: {asset}")
     st.write(f"Position Size: ${position_size:.2f}")
-    st.write(f"Direction: {direction}")
     
     if funding_column in df.columns:
-        funding_rates = df[funding_column] * direction_multiplier
+        funding_rates = df[funding_column]
         hourly_fees = funding_rates / 100 * position_size
         
         st.write("Funding Rates and Fees:")
@@ -181,18 +170,16 @@ def debug_drift_calculations(df, asset, position_size, direction):
     else:
         st.write(f"Required data not found in the dataframe for {asset} on Drift.")
 
-def debug_flash_calculations(df, asset, position_size, direction):
-    st.subheader(f"Debug: Flash Trade Calculations for {asset} ({direction})")
+def debug_flash_calculations(df, asset, position_size):
+    st.subheader(f"Debug: Flash Trade Calculations for {asset}")
     
     borrow_column = f'flashPerp.{asset.lower()}Token.HourlyBorrowRate'
-    direction_multiplier = 1 if direction == 'Long' else -1
     
     st.write(f"Asset: {asset}")
     st.write(f"Position Size: ${position_size:.2f}")
-    st.write(f"Direction: {direction}")
     
     if borrow_column in df.columns:
-        borrow_rates = df[borrow_column] * direction_multiplier
+        borrow_rates = df[borrow_column]
         hourly_fees = borrow_rates / 100 * position_size
         
         st.write("Borrow Rates and Fees:")
@@ -230,12 +217,11 @@ def debug_flash_calculations(df, asset, position_size, direction):
     else:
         st.write(f"Required data not found in the dataframe for {asset} on Flash Trade.")
 
-def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage, asgard_open_fee, asgard_close_fee, direction):
-    st.subheader(f"Debug: Asgard ({exchange.capitalize()}) Calculations for {asset} ({direction})")
+def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position_size, leverage, asgard_open_fee, asgard_close_fee):
+    st.subheader(f"Debug: Asgard ({exchange.capitalize()}) Calculations for {asset}")
     
     deposit_column = f'{exchange}.{asset.lower()}Token.depositIRate'
     borrow_column = f'{exchange}.{asgard_borrow_asset.lower()}Token.borrowIRate'
-    direction_multiplier = 1 if direction == 'Long' else -1
     
     st.write(f"Asset: {asset}")
     st.write(f"Borrow Asset: {asgard_borrow_asset}")
@@ -243,18 +229,13 @@ def debug_asgard_calculations(exchange, asset, asgard_borrow_asset, df, position
     st.write(f"Leverage: {leverage}x")
     st.write(f"Opening Fee: {asgard_open_fee*100:.2f}%")
     st.write(f"Closing Fee: {asgard_close_fee*100:.2f}%")
-    st.write(f"Direction: {direction}")
     
     if deposit_column in df.columns and borrow_column in df.columns:
         yearly_deposit_rates = df[deposit_column] * 100  # Convert to percentage
         yearly_borrow_rates = df[borrow_column] * 100  # Convert to percentage
         deposit_rates = df[deposit_column] / (365 * 24) * 100
         borrow_rates = df[borrow_column] / (365 * 24) * 100
-        if direction == 'Long':
-            net_rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
-        else:  # Short
-            net_rates = deposit_rates - borrow_rates - (deposit_rates / leverage)
-        net_rates *= direction_multiplier
+        net_rates = borrow_rates - (borrow_rates / leverage) - deposit_rates
         hourly_fees = net_rates / 100 * position_size
         
         st.write("Rates and Fees:")
@@ -314,7 +295,6 @@ with st.sidebar:
     INITIAL_CAPITAL = st.number_input('Initial Capital (USD)', min_value=1.0, value=10000.0, step=100.0)
     LEVERAGE = st.selectbox('Select Leverage', LEVERAGE_OPTIONS, index=1)
     ASGARD_BORROW_ASSET = st.selectbox('Select Asgard Borrow Asset', ASGARD_BORROW_ASSETS)
-    DIRECTION = st.radio('Select Direction', ['Long', 'Short'], index=0)
     
     # New inputs for Asgard fees
     st.subheader('Asgard Fees')
@@ -337,7 +317,6 @@ st.write(f"Asset: {SELECTED_ASSET}")
 st.write(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
 st.write(f"Leverage: {LEVERAGE}x")
 st.write(f"Asgard Borrow Asset: {ASGARD_BORROW_ASSET}")
-st.write(f"Direction: {DIRECTION}")
 st.write(f"Asgard Opening Fee: {ASGARD_OPEN_FEE*100:.2f}%")
 st.write(f"Asgard Closing Fee: {ASGARD_CLOSE_FEE*100:.2f}%")
 
@@ -358,7 +337,7 @@ if data:
         'kamino': 'Asgard (Kamino)'
     }
 
-    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE, DIRECTION) for ex in displayed_exchanges}
+    fees_data = {ex: calculate_exchange_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE) for ex in displayed_exchanges}
     
     # Create and display fee comparison table
     fee_df = pd.DataFrame({
@@ -371,7 +350,7 @@ if data:
     })
     fee_df = fee_df[['Exchange', 'Discount', 'Open Fees', 'Variable Fees', 'Close Fees', 'Total Fees']]
 
-    st.subheader(f"Fee Comparison ({DIRECTION})")
+    st.subheader("Fee Comparison")
     st.table(fee_df.set_index('Exchange').style.format({
         'Open Fees': '${:.2f}',
         'Variable Fees': '${:.2f}',
@@ -381,7 +360,7 @@ if data:
     }))
     
     # Display rate statistics
-    st.subheader(f"Rate Statistics ({DIRECTION})")
+    st.subheader("Rate Statistics")
     cols = st.columns(len(displayed_exchanges))
     for i, ex in enumerate(displayed_exchanges):
         with cols[i]:
@@ -395,7 +374,7 @@ if data:
                 st.write("No data available")
     
     # Create and display charts
-    st.subheader(f"Rates Over Time ({DIRECTION})")
+    st.subheader("Rates Over Time")
     rates_df = pd.DataFrame({exchange_names[ex]: fees_data[ex][4] for ex in displayed_exchanges if fees_data[ex][5]})
     if not rates_df.empty:
         st.line_chart(rates_df)
@@ -403,9 +382,9 @@ if data:
         st.write("No data available for rates over time")
     
     # Create hourly variable fees chart for all exchanges
-    st.subheader(f"Hourly Variable Fees Comparison ({DIRECTION})")
+    st.subheader("Hourly Variable Fees Comparison")
     hourly_fees_df = pd.DataFrame({
-        exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET, DIRECTION)
+        exchange_names[ex]: calculate_hourly_variable_fees(df, ex, SELECTED_ASSET, position_size, LEVERAGE, ASGARD_BORROW_ASSET)
         for ex in displayed_exchanges
     })
     hourly_fees_df.index = pd.to_datetime(df['createdAt'])
@@ -420,11 +399,11 @@ if data:
     st.line_chart(hourly_fees_df)
 
     # Create and display cumulative variable fees chart
-    st.subheader(f"Cumulative Variable Fees Comparison ({DIRECTION})")
+    st.subheader("Cumulative Variable Fees Comparison")
     cumulative_fees_df = hourly_fees_df.cumsum()
     st.line_chart(cumulative_fees_df)
     
-    st.subheader(f"Total Fees Over Time ({DIRECTION})")
+    st.subheader("Total Fees Over Time")
     total_fees_df = pd.DataFrame(index=pd.to_datetime(df['createdAt']))
 
     for ex in displayed_exchanges:
@@ -450,14 +429,14 @@ if data:
 
     # Debug calculations
     if 'drift' in displayed_exchanges and fees_data['drift'][5]:
-        debug_drift_calculations(df, SELECTED_ASSET, position_size, DIRECTION)
+        debug_drift_calculations(df, SELECTED_ASSET, position_size)
 
     if 'flash' in displayed_exchanges and fees_data['flash'][5]:
-        debug_flash_calculations(df, SELECTED_ASSET, position_size, DIRECTION)
+        debug_flash_calculations(df, SELECTED_ASSET, position_size)
 
     for ex in ['marginfi', 'kamino']:
         if ex in displayed_exchanges and fees_data[ex][5]:
-            debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE, DIRECTION)
+            debug_asgard_calculations(ex, SELECTED_ASSET, ASGARD_BORROW_ASSET, df, position_size, LEVERAGE, ASGARD_OPEN_FEE, ASGARD_CLOSE_FEE)
 
     # Add explanatory text
     st.info("Note: For variable fees, positive values indicate fees paid by the trader, while negative values indicate fees received by the trader.")
